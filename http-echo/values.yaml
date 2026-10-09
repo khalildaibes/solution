@@ -1,6 +1,4 @@
 # Default values for http-echo.
-# This is a YAML-formatted file.
-# Declare variables to be passed into your templates.
 
 replicaCount: 1
 
@@ -15,26 +13,34 @@ nameOverride: ""
 fullnameOverride: ""
 
 serviceAccount:
-  # Specifies whether a service account should be created
   create: true
-  # Annotations to add to the service account
   annotations: {}
-  # The name of the service account to use.
-  # If not set and create is true, a name is generated using the fullname template
   name: ""
+  # The echo server never calls the Kubernetes API, so do not mount a token into the pod.
+  automountServiceAccountToken: false
 
 podAnnotations: {}
 
-podSecurityContext: {}
-  # fsGroup: 2000
+app:
+  # Port the echo-server process listens on. The image reads it from the PORT env var
+  # (default 80). An unprivileged port lets the container run as a non-root user.
+  port: 5678
 
-securityContext: {}
-  # capabilities:
-  #   drop:
-  #   - ALL
-  # readOnlyRootFilesystem: true
-  # runAsNonRoot: true
-  # runAsUser: 1000
+# Pod-level hardening: unprivileged UID, default seccomp profile.
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  seccompProfile:
+    type: RuntimeDefault
+
+# Container-level hardening: the app only needs to read its own code and open a socket.
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
 
 service:
   type: ClusterIP
@@ -43,35 +49,54 @@ service:
 ingress:
   enabled: true
   className: "nginx"
-  annotations: {}
-    # kubernetes.io/ingress.class: nginx
-    # kubernetes.io/tls-acme: "true"
+  annotations:
+    # The assignment verifies both http:// and https://, so plain HTTP is not redirected.
+    # In a real production deployment set this to "true" so every client is forced onto TLS.
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
   hosts:
     - host: http-echo.k8s-server.local
       paths:
         - path: /
-          pathType: ImplementationSpecific
-  tls: []
-  #  - secretName: chart-example-tls
-  #    hosts:
-  #      - chart-example.local
+          pathType: Prefix
+  # TLS is terminated by ingress-nginx. The secret is created out of band
+  # (scripts/03-create-tls-secret.sh for the lab, cert-manager in production).
+  tls:
+    - secretName: http-echo-tls
+      hosts:
+        - http-echo.k8s-server.local
 
-resources: 
-  # We usually recommend not to specify default resources and to leave this as a conscious
-  # choice for the user. This also increases chances charts run on environments with little
-  # resources, such as Minikube. If you do want to specify resources, uncomment the following
-  # lines, adjust them as necessary, and remove the curly braces after 'resources:'.
-  # limits:
-  #   cpu: 8
-  #   memory: 10Mi
-   requests:
-     cpu: "6"
-     memory: "1Mi"
+# Measured footprint of echo-server 0.5.2 at idle: ~18 MiB RSS, ~0 CPU (docker stats).
+# Requests reflect what the pod really needs so it schedules on any node (e.g. a 2-CPU
+# minikube VM). No CPU limit on purpose: CFS throttling adds latency and brings no benefit here.
+resources:
+  requests:
+    cpu: 10m
+    memory: 32Mi
+  limits:
+    memory: 64Mi
+
+# HTTP probes against the app port. The image has no bash, so exec probes are not an option.
+livenessProbe:
+  httpGet:
+    path: /
+    port: http
+  initialDelaySeconds: 5
+  periodSeconds: 10
+  timeoutSeconds: 2
+  failureThreshold: 3
+readinessProbe:
+  httpGet:
+    path: /
+    port: http
+  initialDelaySeconds: 3
+  periodSeconds: 5
+  timeoutSeconds: 2
+  failureThreshold: 3
 
 autoscaling:
   enabled: false
   minReplicas: 1
-  maxReplicas: 100
+  maxReplicas: 5
   targetCPUUtilizationPercentage: 80
   # targetMemoryUtilizationPercentage: 80
 

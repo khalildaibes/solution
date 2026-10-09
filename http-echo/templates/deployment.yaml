@@ -8,6 +8,7 @@ spec:
   {{- if not .Values.autoscaling.enabled }}
   replicas: {{ .Values.replicaCount }}
   {{- end }}
+  revisionHistoryLimit: 3
   selector:
     matchLabels:
       {{- include "http-echo.selectorLabels" . | nindent 6 }}
@@ -25,6 +26,7 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       serviceAccountName: {{ include "http-echo.serviceAccountName" . }}
+      automountServiceAccountToken: {{ .Values.serviceAccount.automountServiceAccountToken }}
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
       containers:
@@ -33,23 +35,19 @@ spec:
             {{- toYaml .Values.securityContext | nindent 12 }}
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
-          args:
-            - -port
-            - "{{ .Values.service.port }}"
+          # ealen/echo-server is configured through environment variables. Its entrypoint is
+          # "node webserver", which ignores CLI flags such as "-port".
+          env:
+            - name: PORT
+              value: {{ .Values.app.port | quote }}
           ports:
             - name: http
-              containerPort: 5678
+              containerPort: {{ .Values.app.port }}
               protocol: TCP
           livenessProbe:
-            exec:
-              command:
-                - /bin/bash
-                - -c
-                - "wget --spider -q http://localhost:{{ .Values.service.port }}"
+            {{- toYaml .Values.livenessProbe | nindent 12 }}
           readinessProbe:
-            httpGet:
-              path: /
-              port: http
+            {{- toYaml .Values.readinessProbe | nindent 12 }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
       {{- with .Values.nodeSelector }}

@@ -1,0 +1,9 @@
+# Generated TLS material (private keys) - never commit
+tls/
+# Helm packaging output
+*.tgz
+# OS / editor noise
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

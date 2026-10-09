@@ -6,10 +6,20 @@ metadata:
     {{- include "http-echo.labels" . | nindent 4 }}
   annotations:
     "helm.sh/hook": test
+    "helm.sh/hook-delete-policy": hook-succeeded
 spec:
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
   containers:
     - name: wget
-      image: busybox
-      command: ['wget']
-      args: ['{{ include "http-echo.fullname" . }}:{{ .Values.service.port }}']
+      image: busybox:1.36
+      command: ["wget"]
+      args: ["-qO-", "--timeout=5", "http://{{ include "http-echo.fullname" . }}:{{ .Values.service.port }}/"]
+      resources:
+        requests:
+          cpu: 10m
+          memory: 16Mi
+        limits:
+          memory: 32Mi
   restartPolicy: Never
